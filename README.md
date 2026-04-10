@@ -57,6 +57,8 @@ go install github.com/ekoru/dev-flow-tui/cmd/dev-flow@latest
 | `r` | Refresh worktree list |
 | `q` | Quit |
 
+<img width="1235" height="748" alt="main" src="https://github.com/user-attachments/assets/ac067439-b1df-41fe-9855-f5ead6ed269b" />
+
 ### Create Worktree Dialog
 
 | Key | Action |
@@ -64,6 +66,8 @@ go install github.com/ekoru/dev-flow-tui/cmd/dev-flow@latest
 | `Tab` | Toggle new branch / existing branch |
 | `Enter` | Confirm |
 | `Esc` | Cancel |
+
+<img width="1235" height="748" alt="new_branch" src="https://github.com/user-attachments/assets/711a8363-df3f-4fb7-9929-eaf0dde97872" />
 
 ### Delete Confirmation
 
