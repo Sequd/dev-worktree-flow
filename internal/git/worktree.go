@@ -68,25 +68,39 @@ func parsePorcelain(raw string) []Worktree {
 }
 
 // Add creates a new worktree.
-// If newBranch is true, creates a new branch from baseBranch.
-// baseBranch can be "HEAD", a branch name, or a commit hash.
-func Add(basePath, branchName, baseBranch string, newBranch bool) error {
+// Auto-detects whether the branch exists locally, on remote, or needs to be created.
+// baseBranch is used as the starting point for new branches (e.g. "origin/release", "main").
+func Add(basePath, branchName, baseBranch string) error {
 	wtPath := filepath.Join(basePath, branchName)
 
+	newBranch := false
 	args := []string{"worktree", "add"}
-	if newBranch && !BranchExists(branchName) {
+	if BranchExists(branchName) {
+		// Branch exists locally — just check it out
+		args = append(args, wtPath, branchName)
+	} else if remoteRef := findRemoteRef(branchName); remoteRef != "" {
+		// Branch exists on remote — create local tracking branch
+		args = append(args, "-b", branchName, wtPath, remoteRef)
+	} else {
+		// New branch — create from baseBranch
+		newBranch = true
 		args = append(args, "-b", branchName, wtPath)
 		if baseBranch != "" && baseBranch != "HEAD" {
 			args = append(args, baseBranch)
 		}
-	} else {
-		args = append(args, wtPath, branchName)
 	}
 
 	out, err := exec.Command("git", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree add: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
+
+	// New branch created from another base (e.g. origin/release):
+	// unset inherited upstream so push goes to origin/<branchName>, not the base
+	if newBranch {
+		_ = exec.Command("git", "-C", wtPath, "branch", "--unset-upstream").Run()
+	}
+
 	return nil
 }
 
@@ -122,6 +136,22 @@ func Remove(wtPath, branch string, force bool) error {
 		return fmt.Errorf("git worktree remove: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// findRemoteRef looks for a remote tracking branch matching the given short name.
+// Returns e.g. "origin/feature/foo" or "" if not found.
+func findRemoteRef(shortName string) string {
+	for _, b := range ListRemoteBranches() {
+		// Strip remote prefix (e.g. "origin/") and compare
+		short := b
+		if idx := strings.Index(b, "/"); idx >= 0 {
+			short = b[idx+1:]
+		}
+		if short == shortName {
+			return b
+		}
+	}
+	return ""
 }
 
 // BranchExists checks if a branch already exists.

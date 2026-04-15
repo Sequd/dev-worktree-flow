@@ -77,7 +77,9 @@ func (m Model) viewList() string {
 
 	// Status
 	status := ""
-	if m.statusMsg != "" {
+	if m.busy {
+		status = statusBarStyle.Render(m.spinner.View() + " " + helpDescStyle.Render(m.busyMsg))
+	} else if m.statusMsg != "" {
 		if m.statusErr {
 			status = statusBarStyle.Render(errorStyle.Render(m.statusMsg))
 		} else {
@@ -277,14 +279,7 @@ func (m Model) viewCreate() string {
 	b.WriteString(titleStyle.Render("create worktree"))
 	b.WriteString("\n\n")
 
-	modeLabel := "new branch"
-	if !m.newBranch {
-		modeLabel = "existing branch"
-	}
-
 	var lines []string
-	lines = append(lines, inputLabelStyle.Render("mode")+"  "+detailValueStyle.Render(modeLabel))
-	lines = append(lines, "")
 	lines = append(lines, inputLabelStyle.Render("branch name"))
 	lines = append(lines, m.branchInput.View())
 	lines = append(lines, "")
@@ -352,7 +347,7 @@ func (m Model) viewCreate() string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, helpDescStyle.Render("tab next  /  ↑↓ select  /  enter confirm  /  esc cancel"))
+	lines = append(lines, helpDescStyle.Render("tab switch field  /  ↑↓ select  /  enter pick/confirm  /  esc cancel"))
 
 	b.WriteString(dialogStyle.Render(strings.Join(lines, "\n")))
 

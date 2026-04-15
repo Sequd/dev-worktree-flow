@@ -19,6 +19,7 @@ type keyMap struct {
 	Confirm    key.Binding
 	Cancel     key.Binding
 	Tab        key.Binding
+	ShiftTab   key.Binding
 	Actions    key.Binding
 	Quit       key.Binding
 }
@@ -71,6 +72,9 @@ var keys = keyMap{
 	),
 	Tab: key.NewBinding(
 		key.WithKeys("tab"),
+	),
+	ShiftTab: key.NewBinding(
+		key.WithKeys("shift+tab"),
 	),
 	Actions: key.NewBinding(
 		key.WithKeys("enter"),

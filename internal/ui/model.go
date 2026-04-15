@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ekoru/dev-flow-tui/internal/agents"
 	"github.com/ekoru/dev-flow-tui/internal/config"
@@ -43,7 +45,6 @@ type Model struct {
 	// Create form
 	branchInput     textinput.Model
 	baseBranchInput textinput.Model
-	newBranch       bool
 	createFocus     int // 0 = branch name, 1 = base branch
 
 	// Branch suggestions
@@ -64,6 +65,11 @@ type Model struct {
 	// Actions menu
 	actionCursor int
 	actions      []action
+
+	// Spinner for async operations
+	spinner spinner.Model
+	busy    bool
+	busyMsg string
 
 	loadErr error
 }
@@ -103,6 +109,10 @@ func NewModel(repoRoot, worktreeBase string, pm *process.Manager, cfg config.Con
 	bi.CharLimit = 128
 	bi.Width = 40
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
+
 	return Model{
 		repoRoot:        repoRoot,
 		worktreeBase:    worktreeBase,
@@ -110,7 +120,7 @@ func NewModel(repoRoot, worktreeBase string, pm *process.Manager, cfg config.Con
 		cfg:             cfg,
 		branchInput:     ti,
 		baseBranchInput: bi,
-		newBranch:       true,
+		spinner:         sp,
 		statusCache:     make(map[string]string),
 		syncCache:       make(map[string]git.SyncStatus),
 	}
@@ -195,8 +205,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case actionResultMsg:
+		m.busy = false
+		m.busyMsg = ""
 		cmd := m.setStatus(msg.msg, msg.err)
-		return m, tea.Batch(cmd, refreshStatusCache)
+		return m, tea.Batch(cmd, loadWorktrees, refreshStatusCache)
 
 	case clearStatusMsg:
 		m.statusMsg = ""
@@ -206,7 +218,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(loadWorktrees, refreshStatusCache, tickAutoRefresh())
 
 	case tea.KeyMsg:
+		if m.busy {
+			return m, nil // block input while busy
+		}
 		return m.handleKey(msg)
+
+	case spinner.TickMsg:
+		if m.busy {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	}
 
 	if m.mode == modeCreate {
@@ -260,7 +283,6 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeCreate
 		m.branchInput.SetValue("")
 		m.baseBranchInput.SetValue("")
-		m.newBranch = true
 		m.createFocus = 0
 		m.statusMsg = ""
 		// Fetch + load branches (fetch to get latest remote refs)
@@ -466,22 +488,27 @@ func (m Model) handleCreateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Tab):
 		if m.createFocus == 0 {
-			// branch name → base branch
 			m.createFocus = 1
 			m.branchInput.Blur()
 			m.showSuggestions = true
 			m.filterBranches()
 			return m, m.baseBranchInput.Focus()
 		}
-		// base branch → toggle mode → branch name
 		m.createFocus = 0
 		m.baseBranchInput.Blur()
 		m.showSuggestions = false
-		m.newBranch = !m.newBranch
 		return m, m.branchInput.Focus()
 
+	case key.Matches(msg, keys.ShiftTab):
+		if m.createFocus == 1 {
+			m.createFocus = 0
+			m.baseBranchInput.Blur()
+			m.showSuggestions = false
+			return m, m.branchInput.Focus()
+		}
+
 	case key.Matches(msg, keys.Up):
-		if m.createFocus == 1 && m.showSuggestions && len(m.filteredBranches) > 0 {
+		if m.showSuggestions && len(m.filteredBranches) > 0 {
 			if m.suggestCursor > 0 {
 				m.suggestCursor--
 			}
@@ -489,7 +516,7 @@ func (m Model) handleCreateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, keys.Down):
-		if m.createFocus == 1 && m.showSuggestions && len(m.filteredBranches) > 0 {
+		if m.showSuggestions && len(m.filteredBranches) > 0 {
 			if m.suggestCursor < len(m.filteredBranches)-1 {
 				m.suggestCursor++
 			}
@@ -497,13 +524,19 @@ func (m Model) handleCreateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, keys.Confirm):
-		// If in suggestions and have a selection, fill it in
-		if m.createFocus == 1 && m.showSuggestions && len(m.filteredBranches) > 0 {
-			m.baseBranchInput.SetValue(m.filteredBranches[m.suggestCursor].Name)
+		// Autocomplete: pick from suggestions
+		if m.showSuggestions && len(m.filteredBranches) > 0 {
+			selected := m.filteredBranches[m.suggestCursor].Name
+			if m.createFocus == 0 {
+				m.branchInput.SetValue(selected)
+			} else {
+				m.baseBranchInput.SetValue(selected)
+			}
 			m.showSuggestions = false
 			return m, nil
 		}
 
+		// No suggestions — Enter confirms the form
 		name := strings.TrimSpace(m.branchInput.Value())
 		if name == "" {
 			cmd := m.setStatus("Branch name cannot be empty", true)
@@ -515,7 +548,7 @@ func (m Model) handleCreateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			base = m.cfg.BaseBranch
 		}
 
-		if err := git.Add(m.worktreeBase, name, base, m.newBranch); err != nil {
+		if err := git.Add(m.worktreeBase, name, base); err != nil {
 			cmd := m.setStatus(err.Error(), true)
 			return m, cmd
 		}
@@ -529,15 +562,20 @@ func (m Model) handleCreateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if m.createFocus == 1 {
 		m.baseBranchInput, cmd = m.baseBranchInput.Update(msg)
-		m.filterBranches()
 	} else {
 		m.branchInput, cmd = m.branchInput.Update(msg)
 	}
+	m.filterBranches()
+	m.showSuggestions = len(m.filteredBranches) > 0
 	return m, cmd
 }
 
 func (m *Model) filterBranches() {
-	query := strings.ToLower(strings.TrimSpace(m.baseBranchInput.Value()))
+	query := strings.TrimSpace(m.baseBranchInput.Value())
+	if m.createFocus == 0 {
+		query = strings.TrimSpace(m.branchInput.Value())
+	}
+	query = strings.ToLower(query)
 	m.filteredBranches = nil
 	m.suggestCursor = 0
 
@@ -565,24 +603,24 @@ func (m Model) handleDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		_ = m.pm.Stop(process.KindCodex, wt.Path)
-		_ = m.pm.Stop(process.KindDocker, wt.Path)
-
-		// If dirty and not force-confirmed, try normal remove first
-		force := false
-		if git.IsDirty(wt.Path) {
-			force = true
-		}
-
-		if err := git.Remove(wt.Path, wt.Branch, force); err != nil {
-			m.mode = modeList
-			cmd := m.setStatus(err.Error(), true)
-			return m, cmd
-		}
+		wtPath := wt.Path
+		wtBranch := wt.Branch
 
 		m.mode = modeList
-		cmd := m.setStatus(fmt.Sprintf("Removed worktree '%s'", wt.Branch), false)
-		return m, tea.Batch(cmd, loadWorktrees, refreshStatusCache)
+		m.busy = true
+		m.busyMsg = fmt.Sprintf("Removing '%s'...", wtBranch)
+
+		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			_ = m.pm.Stop(process.KindCodex, wtPath)
+			_ = m.pm.Stop(process.KindDocker, wtPath)
+
+			force := git.IsDirty(wtPath)
+
+			if err := git.Remove(wtPath, wtBranch, force); err != nil {
+				return actionResultMsg{msg: err.Error(), err: true}
+			}
+			return actionResultMsg{msg: fmt.Sprintf("Removed worktree '%s'", wtBranch), err: false}
+		})
 
 	case "n", "N", "esc":
 		m.mode = modeList
