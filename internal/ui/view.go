@@ -219,6 +219,7 @@ func (m Model) renderHelp() string {
 		{"c", "create"},
 		{"d", "delete"},
 		{"g", "pull"},
+		{"p", "push"},
 		{"f", "fetch"},
 		{"r", "refresh"},
 		{"q", "quit"},

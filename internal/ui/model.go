@@ -337,6 +337,16 @@ func (m Model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return actionResultMsg{msg: "Pull complete", err: false}
 			})
 		}
+	case key.Matches(msg, keys.GitPush):
+		if wt := m.selected(); wt != nil {
+			cmd := m.setStatus("Pushing...", false)
+			return m, tea.Batch(cmd, func() tea.Msg {
+				if err := git.Push(wt.Path); err != nil {
+					return actionResultMsg{msg: "Push: " + err.Error(), err: true}
+				}
+				return actionResultMsg{msg: "Push complete", err: false}
+			})
+		}
 	case key.Matches(msg, keys.GitFetch):
 		if wt := m.selected(); wt != nil {
 			cmd := m.setStatus("Fetching...", false)
@@ -419,6 +429,14 @@ func (m *Model) openActions(wt *git.Worktree) {
 					return actionResultMsg{msg: "Pull: " + err.Error(), err: true}
 				}
 				return actionResultMsg{msg: "Pull complete", err: false}
+			})
+		}},
+		action{"p", "Git Push", func(m *Model) tea.Cmd {
+			return tea.Batch(m.setStatus("Pushing...", false), func() tea.Msg {
+				if err := git.Push(wt.Path); err != nil {
+					return actionResultMsg{msg: "Push: " + err.Error(), err: true}
+				}
+				return actionResultMsg{msg: "Push complete", err: false}
 			})
 		}},
 		action{"f", "Git Fetch", func(m *Model) tea.Cmd {

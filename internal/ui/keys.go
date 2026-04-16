@@ -14,6 +14,7 @@ type keyMap struct {
 	DockerUp   key.Binding
 	DockerDown key.Binding
 	GitPull    key.Binding
+	GitPush    key.Binding
 	GitFetch   key.Binding
 	Refresh    key.Binding
 	Confirm    key.Binding
@@ -57,6 +58,9 @@ var keys = keyMap{
 	),
 	GitPull: key.NewBinding(
 		key.WithKeys("g"),
+	),
+	GitPush: key.NewBinding(
+		key.WithKeys("p"),
 	),
 	GitFetch: key.NewBinding(
 		key.WithKeys("f"),

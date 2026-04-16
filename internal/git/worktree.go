@@ -373,6 +373,16 @@ func Pull(wtPath string) error {
 	return nil
 }
 
+// Push runs git push origin HEAD in the given worktree.
+func Push(wtPath string) error {
+	cmd := exec.Command("git", "-C", wtPath, "push", "origin", "HEAD")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git push: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // Fetch runs git fetch in the given worktree.
 func Fetch(wtPath string) error {
 	cmd := exec.Command("git", "-C", wtPath, "fetch")
